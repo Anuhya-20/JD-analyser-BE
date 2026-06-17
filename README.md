@@ -1,6 +1,7 @@
 You are a Principal AI Architect, Staff Python Engineer, LangGraph Expert, and System Designer.
 
-I want you to build a complete enterprise-grade AI Recruitment Platform that performs Job Description analysis, Resume Parsing, Candidate Matching, Ranking, and Recruiter Recommendations.
+I want you to build a complete enterprise-grade AI Recruitment sk-7ee92d7795fd4a0797eddc1eaccb6a2a
+  Platform that performs Job Description analysis, Resume Parsing, Candidate Matching, Ranking, and Recruiter Recommendations.
 
 Generate the complete production-ready source code.
 
