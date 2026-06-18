@@ -38,7 +38,7 @@ alembic/__pycache__/
 *.bin
 *.onnx
 *.h5
-models/
+/models/
 .cache/
 huggingface/
 sentence_transformers_cache/
