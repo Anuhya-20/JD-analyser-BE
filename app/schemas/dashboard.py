@@ -59,6 +59,39 @@ class DashboardResponse(BaseModel):
     created_at: datetime
 
 
+class WeeklyActivityItem(BaseModel):
+    day: str
+    date: str
+    resumes: int
+    matches: int
+
+
+class PipelineStage(BaseModel):
+    stage: str
+    count: int
+
+
+class GlobalDashboardResponse(BaseModel):
+    # Summary cards
+    total_candidates: int
+    total_candidates_change_pct: Optional[float]
+
+    active_jobs: int
+    new_jobs_this_week: int
+
+    shortlisted: int
+    shortlist_rate: Optional[float]
+
+    avg_match_score: Optional[float]
+    avg_match_score_change_pct: Optional[float]
+
+    # Weekly activity chart (last 7 days)
+    weekly_activity: List[WeeklyActivityItem]
+
+    # Candidate pipeline
+    pipeline: List[PipelineStage]
+
+
 class PipelineStatusResponse(BaseModel):
     job_description_id: uuid.UUID
     status: str

@@ -31,6 +31,7 @@ class CandidateRatingItem(BaseModel):
     matched_skills_count: int
     missing_skills_count: int
     recommendation_level: Optional[str]
+    status: Optional[str] = "pending"
 
 
 class CandidateRatingListResponse(BaseModel):

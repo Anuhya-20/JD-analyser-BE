@@ -34,6 +34,18 @@ _EMAIL_RE = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
 _YEARS_RE = re.compile(r'(\d+)\+?\s*(?:years?|yrs?)(?:\s+of)?\s+(?:experience|exp)', re.I)
 
 
+def _name_from_email(email: Optional[str]) -> Optional[str]:
+    """Derive a display name from an email address when full_name is unavailable.
+    e.g. john.doe@gmail.com → 'John Doe', john_doe@company.com → 'John Doe'
+    """
+    if not email or "@" not in email:
+        return None
+    local = email.split("@")[0]
+    parts = re.split(r"[._\-]+", local)
+    name = " ".join(p.capitalize() for p in parts if p)
+    return name or None
+
+
 class WorkExp(BaseModel):
     company: Optional[str] = None
     title: Optional[str] = None
@@ -174,7 +186,7 @@ def _extract_basic_profile(resume: ResumeData, required_skills: List[str], prefe
 
     return CandidateProfile(
         resume_id=resume["resume_id"],
-        full_name=None, email=email, phone=None, location=None,
+        full_name=_name_from_email(email), email=email, phone=None, location=None,
         linkedin_url=None, github_url=None, portfolio_url=None, summary=None,
         skills=found_skills,
         work_experience=[], internships=[], academic_projects=[],
@@ -237,7 +249,7 @@ def _build_profile(resume: ResumeData, required_skills: List[str] = (), preferre
 
         return CandidateProfile(
             resume_id=resume["resume_id"],
-            full_name=result.full_name,
+            full_name=result.full_name or _name_from_email(result.email),
             email=result.email,
             phone=result.phone,
             location=result.location,

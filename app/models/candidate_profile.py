@@ -1,10 +1,17 @@
 import uuid
+import enum
 from typing import Optional
-from sqlalchemy import String, Text, ForeignKey, JSON, Float, Index
+from sqlalchemy import String, Text, ForeignKey, JSON, Float, Index, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 from app.models.base import UUIDMixin, TimestampMixin
+
+
+class CandidateStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
 
 
 
@@ -41,6 +48,13 @@ class CandidateProfile(Base, UUIDMixin, TimestampMixin):
     projects: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     languages: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     publications: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+    # HR review status
+    status: Mapped[CandidateStatus] = mapped_column(
+        SAEnum(CandidateStatus, values_callable=lambda x: [e.value for e in x], native_enum=False),
+        default=CandidateStatus.PENDING,
+        nullable=False,
+    )
 
     # Computed metrics
     total_years_experience: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

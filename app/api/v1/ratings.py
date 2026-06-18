@@ -111,6 +111,7 @@ async def get_ratings(
             matched_skills_count=len(mr.matched_skills or []),
             missing_skills_count=len(mr.missing_skills or []),
             recommendation_level=rec.level.value if rec else None,
+            status=cp.status.value if cp else "pending",
         ))
 
     return CandidateRatingListResponse(
