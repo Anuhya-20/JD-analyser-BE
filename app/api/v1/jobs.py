@@ -19,6 +19,8 @@ from app.schemas.job_description import (
     JobDescriptionCreate,
     JobDescriptionResponse,
     JobDescriptionListResponse,
+    JobTitleItem,
+    JobTitleListResponse,
 )
 from app.services.file_service import file_service
 from app.services.pipeline_service import execute_pipeline, analyze_jd_only
@@ -146,6 +148,37 @@ async def list_job_descriptions(
 
     return JobDescriptionListResponse(
         items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=math.ceil(total / page_size) if total > 0 else 1,
+    )
+
+
+@router.get("/titles", response_model=JobTitleListResponse)
+async def list_active_job_titles(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Case-insensitive search by job title"),
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """List titles of all active job descriptions with optional title search and pagination."""
+    query = select(JobDescription).where(JobDescription.is_active == True)  # noqa: E712
+    if search:
+        query = query.where(JobDescription.title.ilike(f"%{search}%"))
+
+    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    total = count_result.scalar_one()
+
+    rows = (await db.execute(
+        query.order_by(JobDescription.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )).scalars().all()
+
+    return JobTitleListResponse(
+        items=[JobTitleItem(id=jd.id, title=jd.title, company_name=jd.company_name) for jd in rows],
         total=total,
         page=page,
         page_size=page_size,

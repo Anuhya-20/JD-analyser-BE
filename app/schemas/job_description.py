@@ -70,3 +70,19 @@ class JobDescriptionListResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+class JobTitleItem(BaseModel):
+    id: uuid.UUID
+    title: str
+    company_name: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class JobTitleListResponse(BaseModel):
+    items: List[JobTitleItem]
+    total: int
+    page: int
+    page_size: int
+    pages: int

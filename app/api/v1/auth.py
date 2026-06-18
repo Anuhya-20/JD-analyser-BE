@@ -3,9 +3,12 @@ HR Authentication endpoints.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import random
+import string
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from loguru import logger
@@ -23,13 +26,13 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.core.security import (
+    blacklist_token,
     create_access_token,
-    generate_reset_token,
     hash_password,
-    reset_token_expiry,
     verify_password,
 )
 from app.core.deps import get_current_hr_user
+from app.utils.email import send_otp_email
 
 router = APIRouter()
 
@@ -86,50 +89,73 @@ async def get_me(current_user: HRUser = Depends(get_current_hr_user)):
     return current_user
 
 
+@router.post("/logout", status_code=200)
+async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=True)),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """
+    Invalidate the current bearer token.
+    The token is added to an in-memory blacklist and rejected on all future requests.
+    """
+    blacklist_token(credentials.credentials)
+    logger.info(f"HR logout: {current_user.email}")
+    return {"message": "Logged out successfully"}
+
+
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
 async def forgot_password(payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     """
-    Request a password reset token.
-    In production the token is emailed; here it is returned in the response for testing.
+    Generate a 6-digit OTP and email it to the user.
+    Always returns 200 to avoid leaking whether the email exists.
     """
     result = await db.execute(select(HRUser).where(HRUser.email == payload.email))
     user = result.scalar_one_or_none()
 
-    # Always return 200 so we don't leak whether the email exists
     if not user or not user.is_active:
         return ForgotPasswordResponse(
-            message="If that email is registered you will receive a reset link shortly."
+            message="If that email is registered, an OTP has been sent to it."
         )
 
-    token = generate_reset_token()
-    user.password_reset_token = token
-    user.password_reset_expires = reset_token_expiry()
+    otp = "".join(random.choices(string.digits, k=6))
+    user.password_reset_token = otp
+    user.password_reset_expires = datetime.now(timezone.utc) + timedelta(
+        minutes=10
+    )
     await db.commit()
 
-    logger.info(f"Password reset requested for: {user.email}")
+    try:
+        await send_otp_email(user.email, user.full_name, otp)
+    except Exception as e:
+        logger.error(f"[Email] Failed to send OTP to {user.email}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to send OTP email. Please try again later.",
+        )
 
-    return ForgotPasswordResponse(
-        message="Password reset token generated. Use it within 1 hour.",
-        reset_token=token,   # In production: send via email, omit from response
-    )
+    logger.info(f"OTP sent to: {user.email}")
+    return ForgotPasswordResponse(message="A 6-digit OTP has been sent to your email. It expires in 10 minutes.")
 
 
 @router.post("/reset-password", response_model=ResetPasswordResponse)
 async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     """
-    Reset password using the token received from /forgot-password.
-    Requires: reset_token, new_password, confirm_password.
+    Reset password using the OTP received via email.
+    Requires: email, otp, new_password, confirm_password.
     """
-    result = await db.execute(
-        select(HRUser).where(HRUser.password_reset_token == payload.reset_token)
-    )
+    result = await db.execute(select(HRUser).where(HRUser.email == payload.email))
     user = result.scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    invalid_msg = "Invalid or expired OTP."
+
+    if not user or not user.password_reset_token:
+        raise HTTPException(status_code=400, detail=invalid_msg)
 
     if user.password_reset_expires is None or datetime.now(timezone.utc) > user.password_reset_expires:
-        raise HTTPException(status_code=400, detail="Reset token has expired. Request a new one.")
+        raise HTTPException(status_code=400, detail="OTP has expired. Request a new one.")
+
+    if user.password_reset_token != payload.otp:
+        raise HTTPException(status_code=400, detail=invalid_msg)
 
     user.hashed_password = hash_password(payload.new_password)
     user.password_reset_token = None

@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8   # 8 hours
     RESET_TOKEN_EXPIRE_HOURS: int = 1
+    OTP_EXPIRE_MINUTES: int = 10
+
+    # Email / SMTP
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    EMAIL_FROM: str = ""
+    EMAIL_FROM_NAME: str = "JD Analyser"
 
     # Storage
     UPLOAD_DIR: str = "./uploads"

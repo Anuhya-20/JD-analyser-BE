@@ -45,12 +45,11 @@ class ForgotPasswordRequest(BaseModel):
 
 class ForgotPasswordResponse(BaseModel):
     message: str
-    # In production this would be emailed; returned here for dev/testing
-    reset_token: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
-    reset_token: str
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=8)
     confirm_password: str
 
