@@ -1,0 +1,87 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+MANIFEST
+
+# ── Virtual Environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env/
+
+# ── Environment Variables ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# Keep migrations tracked; ignore only generated temp files
+alembic/__pycache__/
+
+# ── ML Models & Large Files ───────────────────────────────────────────────────
+*.pt
+*.pth
+*.bin
+*.onnx
+*.h5
+models/
+.cache/
+huggingface/
+sentence_transformers_cache/
+
+# ── Uploaded / Processed Files ────────────────────────────────────────────────
+uploads/
+temp/
+tmp/
+*.pdf
+*.docx
+*.doc
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+loguru_logs/
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# ── IDE & Editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Mypy / Type Checkers ──────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.dockerignore
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+.benchmarks/
