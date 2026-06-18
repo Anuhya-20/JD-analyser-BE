@@ -24,6 +24,8 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     ResetPasswordResponse,
     TokenResponse,
+    VerifyOTPRequest,
+    VerifyOTPResponse,
 )
 from app.core.security import (
     blacklist_token,
@@ -137,18 +139,18 @@ async def forgot_password(payload: ForgotPasswordRequest, db: AsyncSession = Dep
     return ForgotPasswordResponse(message="A 6-digit OTP has been sent to your email. It expires in 10 minutes.")
 
 
-@router.post("/reset-password", response_model=ResetPasswordResponse)
-async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/verify-otp", response_model=VerifyOTPResponse)
+async def verify_otp(payload: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
     """
-    Reset password using the OTP received via email.
-    Requires: email, otp, new_password, confirm_password.
+    Verify the 6-digit OTP sent via forgot-password.
+    On success the user is marked as OTP-verified and can call reset-password.
     """
     result = await db.execute(select(HRUser).where(HRUser.email == payload.email))
     user = result.scalar_one_or_none()
 
     invalid_msg = "Invalid or expired OTP."
 
-    if not user or not user.password_reset_token:
+    if not user or not user.password_reset_token or user.password_reset_token == "VERIFIED":
         raise HTTPException(status_code=400, detail=invalid_msg)
 
     if user.password_reset_expires is None or datetime.now(timezone.utc) > user.password_reset_expires:
@@ -156,6 +158,29 @@ async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depen
 
     if user.password_reset_token != payload.otp:
         raise HTTPException(status_code=400, detail=invalid_msg)
+
+    # Mark OTP as verified; keep expires so reset-password window is enforced
+    user.password_reset_token = "VERIFIED"
+    await db.commit()
+
+    logger.info(f"OTP verified for: {user.email}")
+    return VerifyOTPResponse(message="OTP verified successfully. You can now reset your password.")
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse)
+async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Reset password after OTP has been verified via /verify-otp.
+    Requires: email, new_password, confirm_password.
+    """
+    result = await db.execute(select(HRUser).where(HRUser.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    if not user or user.password_reset_token != "VERIFIED":
+        raise HTTPException(status_code=400, detail="OTP not verified. Please verify your OTP first.")
+
+    if user.password_reset_expires is None or datetime.now(timezone.utc) > user.password_reset_expires:
+        raise HTTPException(status_code=400, detail="Session expired. Please request a new OTP.")
 
     user.hashed_password = hash_password(payload.new_password)
     user.password_reset_token = None
