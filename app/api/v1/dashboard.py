@@ -3,11 +3,12 @@ Dashboard API — recruiter-facing results view.
 """
 from __future__ import annotations
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, cast, Date
 from loguru import logger
 
 from app.database import get_db
@@ -15,18 +16,171 @@ from app.models.job_description import JobDescription, JDStatus
 from app.models.resume import Resume, ResumeStatus
 from app.models.hr_user import HRUser
 from app.core.deps import get_current_hr_user
-from app.models.candidate_profile import CandidateProfile
+from app.models.candidate_profile import CandidateProfile, CandidateStatus
 from app.models.match_result import MatchResult, MatchStatus
 from app.models.recommendation import Recommendation
 from app.schemas.dashboard import (
     DashboardResponse,
     CandidateSummary,
+    GlobalDashboardResponse,
+    WeeklyActivityItem,
+    PipelineStage,
     ScoreDistribution,
     PipelineStatusResponse,
 )
 from app.schemas.match_result import RankedCandidateResponse
 
 router = APIRouter()
+
+
+@router.get("/overview", response_model=GlobalDashboardResponse)
+async def get_global_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """Global dashboard — all stats across all JDs, no JD filter required."""
+    now = datetime.now(timezone.utc)
+    this_month_start = now - timedelta(days=30)
+    last_month_start = now - timedelta(days=60)
+    week_start = now - timedelta(days=7)
+
+    # ── Total candidates (this month vs last month) ────────────────────────────
+    total_candidates = (await db.execute(
+        select(func.count(CandidateProfile.id))
+    )).scalar_one()
+
+    this_month_candidates = (await db.execute(
+        select(func.count(CandidateProfile.id)).where(CandidateProfile.created_at >= this_month_start)
+    )).scalar_one()
+
+    last_month_candidates = (await db.execute(
+        select(func.count(CandidateProfile.id)).where(
+            CandidateProfile.created_at >= last_month_start,
+            CandidateProfile.created_at < this_month_start,
+        )
+    )).scalar_one()
+
+    candidates_change_pct = None
+    if last_month_candidates > 0:
+        candidates_change_pct = round((this_month_candidates - last_month_candidates) / last_month_candidates * 100, 1)
+
+    # ── Active jobs & new this week ────────────────────────────────────────────
+    active_jobs = (await db.execute(
+        select(func.count(JobDescription.id)).where(JobDescription.is_active == True)  # noqa: E712
+    )).scalar_one()
+
+    new_jobs_this_week = (await db.execute(
+        select(func.count(JobDescription.id)).where(
+            JobDescription.is_active == True,  # noqa: E712
+            JobDescription.created_at >= week_start,
+        )
+    )).scalar_one()
+
+    # ── Shortlisted (accepted) ─────────────────────────────────────────────────
+    shortlisted = (await db.execute(
+        select(func.count(CandidateProfile.id)).where(
+            CandidateProfile.status == CandidateStatus.ACCEPTED
+        )
+    )).scalar_one()
+
+    shortlist_rate = round(shortlisted / total_candidates * 100, 1) if total_candidates > 0 else 0.0
+
+    # ── Avg match score (this month vs last month) ─────────────────────────────
+    avg_score = (await db.execute(
+        select(func.avg(MatchResult.overall_score)).where(
+            MatchResult.status == MatchStatus.COMPLETED,
+            MatchResult.overall_score.isnot(None),
+        )
+    )).scalar_one_or_none()
+
+    avg_score_this_month = (await db.execute(
+        select(func.avg(MatchResult.overall_score)).where(
+            MatchResult.status == MatchStatus.COMPLETED,
+            MatchResult.overall_score.isnot(None),
+            MatchResult.created_at >= this_month_start,
+        )
+    )).scalar_one_or_none()
+
+    avg_score_last_month = (await db.execute(
+        select(func.avg(MatchResult.overall_score)).where(
+            MatchResult.status == MatchStatus.COMPLETED,
+            MatchResult.overall_score.isnot(None),
+            MatchResult.created_at >= last_month_start,
+            MatchResult.created_at < this_month_start,
+        )
+    )).scalar_one_or_none()
+
+    score_change_pct = None
+    if avg_score_last_month and avg_score_this_month:
+        score_change_pct = round((float(avg_score_this_month) - float(avg_score_last_month)) / float(avg_score_last_month) * 100, 1)
+
+    # ── Weekly activity (last 7 days) ──────────────────────────────────────────
+    resumes_by_day = (await db.execute(
+        select(
+            cast(Resume.created_at, Date).label("day"),
+            func.count(Resume.id).label("cnt"),
+        )
+        .where(Resume.created_at >= week_start)
+        .group_by(cast(Resume.created_at, Date))
+    )).all()
+
+    matches_by_day = (await db.execute(
+        select(
+            cast(MatchResult.created_at, Date).label("day"),
+            func.count(MatchResult.id).label("cnt"),
+        )
+        .where(
+            MatchResult.created_at >= week_start,
+            MatchResult.status == MatchStatus.COMPLETED,
+        )
+        .group_by(cast(MatchResult.created_at, Date))
+    )).all()
+
+    resume_map = {str(r.day): r.cnt for r in resumes_by_day}
+    match_map = {str(m.day): m.cnt for m in matches_by_day}
+
+    DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    weekly_activity = []
+    for i in range(6, -1, -1):
+        day_dt = (now - timedelta(days=i)).date()
+        day_str = str(day_dt)
+        weekly_activity.append(WeeklyActivityItem(
+            day=DAY_NAMES[day_dt.weekday()],
+            date=day_str,
+            resumes=resume_map.get(day_str, 0),
+            matches=match_map.get(day_str, 0),
+        ))
+
+    # ── Candidate pipeline ─────────────────────────────────────────────────────
+    total_resumes = (await db.execute(select(func.count(Resume.id)))).scalar_one()
+
+    screened = (await db.execute(
+        select(func.count(Resume.id)).where(Resume.status != ResumeStatus.PENDING)
+    )).scalar_one()
+
+    matched = (await db.execute(
+        select(func.count(MatchResult.id)).where(MatchResult.status == MatchStatus.COMPLETED)
+    )).scalar_one()
+
+    pipeline = [
+        PipelineStage(stage="Applied",     count=total_resumes),
+        PipelineStage(stage="Screened",    count=screened),
+        PipelineStage(stage="Matched",     count=matched),
+        PipelineStage(stage="Shortlisted", count=shortlisted),
+    ]
+
+    return GlobalDashboardResponse(
+        total_candidates=total_candidates,
+        total_candidates_change_pct=candidates_change_pct,
+        active_jobs=active_jobs,
+        new_jobs_this_week=new_jobs_this_week,
+        shortlisted=shortlisted,
+        shortlist_rate=shortlist_rate,
+        avg_match_score=round(float(avg_score), 2) if avg_score else None,
+        avg_match_score_change_pct=score_change_pct,
+        weekly_activity=weekly_activity,
+        pipeline=pipeline,
+    )
 
 
 @router.get("/{jd_id}", response_model=DashboardResponse)
