@@ -64,6 +64,7 @@ class WeeklyActivityItem(BaseModel):
     date: str
     resumes: int
     matches: int
+    shortlisted: int
 
 
 class PipelineStage(BaseModel):
