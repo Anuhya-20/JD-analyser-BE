@@ -248,6 +248,15 @@ async def execute_pipeline(
                 .where(JobDescription.id == job_description_id)
                 .values(status=JDStatus.FAILED, error_message=str(e)[:1000])
             )
+            # Reset any resumes still stuck in PARSING or PROFILING
+            await db.execute(
+                update(Resume)
+                .where(
+                    Resume.job_description_id == job_description_id,
+                    Resume.status.in_([ResumeStatus.PARSING, ResumeStatus.PROFILING]),
+                )
+                .values(status=ResumeStatus.FAILED, error_message="Pipeline failed unexpectedly")
+            )
             await db.commit()
 
 
@@ -325,6 +334,19 @@ async def _persist_candidate_profiles(
     state: RecruitmentState,
 ) -> None:
     profiles = state.get("candidate_profiles", [])
+
+    # Delete any existing profiles for these resumes (safe re-run / upsert)
+    resume_ids = [uuid.UUID(p["resume_id"]) for p in profiles]
+    if resume_ids:
+        existing = await db.execute(
+            select(CandidateProfileModel).where(
+                CandidateProfileModel.resume_id.in_(resume_ids)
+            )
+        )
+        for existing_profile in existing.scalars().all():
+            await db.delete(existing_profile)
+        await db.flush()
+
     for p in profiles:
         resume_id = uuid.UUID(p["resume_id"])
 

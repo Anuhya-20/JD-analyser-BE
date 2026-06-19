@@ -1,5 +1,5 @@
-"""
-Recommendation Agent — Node 6 (final).
+﻿"""
+Recommendation Agent â€” Node 6 (final).
 
 Token optimisations:
   - Interview questions removed entirely (biggest single saving)
@@ -38,14 +38,14 @@ class RecommendationOutput(BaseModel):
         return coerce_llm_output(cls, v)
 
 
-# Compressed prompt — ~100 token system message
+# Compressed prompt â€” ~100 token system message
 RECOMMENDATION_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "Senior technical recruiter. Write a CONCISE candidate brief. "
-        "KEEP EVERY STRING SHORT: red flags ≤10 words, highlights ≤12 words, stages ≤5 words. "
-        "FRESHER stages: Aptitude→Phone Screen→Assignment→HR. "
-        "EXPERIENCED stages: Phone Screen→Coding→System Design→HM→Ref Check. "
+        "KEEP EVERY STRING SHORT: red flags â‰¤10 words, highlights â‰¤12 words, stages â‰¤5 words. "
+        "FRESHER stages: Aptitudeâ†’Phone Screenâ†’Assignmentâ†’HR. "
+        "EXPERIENCED stages: Phone Screenâ†’Codingâ†’System Designâ†’HMâ†’Ref Check. "
         "Provide 3-4 red flags, 3-4 highlights, recruiter notes in 2 sentences.",
     ),
     (
@@ -116,7 +116,7 @@ def _full_rec(score: MatchScore, profile_lookup: dict, jd: dict) -> CandidateRec
     is_fresher = score.get("candidate_tier") == "fresher"
 
     try:
-        # Compact summaries — cap at 100 chars each
+        # Compact summaries â€” cap at 100 chars each
         work_parts = []
         for j in profile.get("work_experience", [])[:2]:
             if isinstance(j, dict):
@@ -144,7 +144,7 @@ def _full_rec(score: MatchScore, profile_lookup: dict, jd: dict) -> CandidateRec
         ) or "None"
 
         llm = get_llm(temperature=0.3, max_tokens=600)
-        chain = RECOMMENDATION_PROMPT | llm.with_structured_output(RecommendationOutput)
+        chain = RECOMMENDATION_PROMPT | llm.with_structured_output(RecommendationOutput, method="function_calling")
 
         result: RecommendationOutput = chain.invoke({
             "jd_title":          jd.get("title", ""),

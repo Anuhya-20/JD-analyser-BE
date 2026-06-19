@@ -22,6 +22,8 @@ from app.core.deps import get_current_hr_user
 from app.schemas.resume import ResumeResponse, ResumeListResponse, BulkUploadResponse
 from app.services.file_service import file_service
 from app.services.pipeline_service import execute_pipeline
+from app.utils.pdf_parser import parse_pdf
+from app.utils.docx_parser import parse_docx
 
 router = APIRouter()
 
@@ -62,6 +64,21 @@ async def upload_resumes(
     for file in files:
         try:
             file_path, unique_filename, file_size, file_type = await file_service.save_resume(file, jd_id)
+
+            # Parse text immediately so raw_text is stored on upload
+            raw_text, page_count = "", 0
+            try:
+                if file_type == "pdf":
+                    raw_text, page_count = parse_pdf(file_path)
+                elif file_type in ("docx", "doc"):
+                    raw_text, page_count = parse_docx(file_path)
+                elif file_type == "txt":
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        raw_text = f.read()
+                    page_count = 1
+            except Exception as parse_err:
+                logger.warning(f"[Resume] Text extraction failed for {file.filename}: {parse_err}")
+
             resume = Resume(
                 job_description_id=jd_id,
                 filename=unique_filename,
@@ -69,6 +86,8 @@ async def upload_resumes(
                 file_path=file_path,
                 file_size_bytes=file_size,
                 file_type=file_type,
+                raw_text=raw_text or None,
+                page_count=page_count or None,
                 status=ResumeStatus.PENDING,
             )
             db.add(resume)
@@ -172,6 +191,19 @@ async def upload_zip(
             dest = job_dir / unique_filename
             dest.write_bytes(file_data)
 
+            # Parse text immediately
+            raw_text, page_count = "", 0
+            try:
+                if file_type == "pdf":
+                    raw_text, page_count = parse_pdf(str(dest))
+                elif file_type in ("docx", "doc"):
+                    raw_text, page_count = parse_docx(str(dest))
+                elif file_type == "txt":
+                    raw_text = dest.read_text(encoding="utf-8", errors="ignore")
+                    page_count = 1
+            except Exception as parse_err:
+                logger.warning(f"[ZIP] Text extraction failed for {basename}: {parse_err}")
+
             resume = Resume(
                 job_description_id=jd_id,
                 filename=unique_filename,
@@ -179,6 +211,8 @@ async def upload_zip(
                 file_path=str(dest),
                 file_size_bytes=len(file_data),
                 file_type=file_type,
+                raw_text=raw_text or None,
+                page_count=page_count or None,
                 status=ResumeStatus.PENDING,
             )
             db.add(resume)

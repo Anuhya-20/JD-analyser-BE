@@ -1,5 +1,5 @@
-"""
-JD Analysis Agent — Node 1.
+﻿"""
+JD Analysis Agent â€” Node 1.
 1 LLM call per pipeline run (negligible cost).
 Optimisation: JD text capped at 2500 chars; system prompt compressed; max_tokens=600.
 """
@@ -43,16 +43,22 @@ class JDStructuredOutput(BaseModel):
     is_internship: bool = False
 
 
-# Compressed prompt — ~60 tokens system vs ~250 before
 JD_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
-        "Expert technical recruiter. Extract structured JD data precisely. "
-        "Levels: Intern|Fresher|Junior|Mid|Senior|Lead|Principal. "
-        "Normalize skills (JS→JavaScript, k8s→Kubernetes). "
-        "Set is_entry_level=true if min_years<=1 or role says fresher/entry/new-grad. "
-        "Set accepts_freshers=true if JD welcomes freshers or min_years=0. "
-        "Set min_years_experience=0 for fresher roles.",
+        "You are an expert technical recruiter extracting structured data from job descriptions.\n\n"
+        "EXPERIENCE EXTRACTION RULES (critical â€” follow exactly):\n"
+        "- Read the EXACT numbers written in the JD. Never infer or guess.\n"
+        "- '1-2 years' â†’ min_years_experience=1, max_years_experience=2\n"
+        "- '2+ years' â†’ min_years_experience=2, max_years_experience=null\n"
+        "- '3 years' â†’ min_years_experience=3, max_years_experience=3\n"
+        "- 'fresher/entry/0 years' â†’ min_years_experience=0, max_years_experience=1\n"
+        "- If no years mentioned â†’ leave both as null\n"
+        "- DO NOT set 5 years just because the tech stack looks senior.\n\n"
+        "LEVEL: Intern|Fresher|Junior|Mid|Senior|Lead|Principal â€” pick from JD wording.\n"
+        "SKILLS: Normalize (JSâ†’JavaScript, k8sâ†’Kubernetes).\n"
+        "FLAGS: is_entry_level=true if min_years<=1 or role says fresher/entry/new-grad. "
+        "accepts_freshers=true if JD welcomes freshers or min_years=0.",
     ),
     (
         "human",
@@ -63,19 +69,19 @@ JD_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
 
 def jd_analysis_node(state: RecruitmentState) -> RecruitmentState:
     if state.get("jd_analysis") is not None:
-        logger.info(f"[JD Analysis] Pre-loaded from DB — skipping LLM call")
+        logger.info(f"[JD Analysis] Pre-loaded from DB â€” skipping LLM call")
         return state
 
     logger.info(f"[JD Analysis] JD={state['job_description_id']}")
 
     try:
-        # Cap JD text — 2500 chars covers virtually all JDs fully
+        # Cap JD text â€” 2500 chars covers virtually all JDs fully
         jd_text = trim_text(state["job_description_text"], max_chars=2500)
         est = estimate_tokens(jd_text)
         logger.debug(f"[JD Analysis] Input ~{est} tokens after trim")
 
         llm = get_llm(temperature=0.0, max_tokens=1500)
-        chain = JD_ANALYSIS_PROMPT | llm.with_structured_output(JDStructuredOutput)
+        chain = JD_ANALYSIS_PROMPT | llm.with_structured_output(JDStructuredOutput, method="function_calling")
         result: JDStructuredOutput = chain.invoke({"jd_text": jd_text})
 
         jd_analysis = result.model_dump()
@@ -91,8 +97,12 @@ def jd_analysis_node(state: RecruitmentState) -> RecruitmentState:
             f"{len(jd_analysis['required_skills'])} req skills"
         )
 
-        embedding_text = _jd_embedding_text(jd_analysis, state["job_description_text"])
-        jd_embedding = embedding_service.embed_document(embedding_text)
+        try:
+            embedding_text = _jd_embedding_text(jd_analysis, state["job_description_text"])
+            jd_embedding = embedding_service.embed_document(embedding_text)
+        except Exception as emb_err:
+            logger.warning(f"[JD Analysis] Embedding skipped (non-critical): {emb_err}")
+            jd_embedding = None
 
         return {
             **state,
@@ -127,3 +137,4 @@ def _jd_embedding_text(jd: dict, raw: str) -> str:
     if jd.get("is_entry_level"):   parts.append("Entry-level / fresher role")
     parts.append(raw[:800])
     return "\n".join(parts)
+

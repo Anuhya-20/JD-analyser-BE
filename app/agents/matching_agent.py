@@ -1,5 +1,5 @@
-"""
-Matching Agent — Node 4.
+﻿"""
+Matching Agent â€” Node 4.
 
 Token optimisations:
   - SKIP LLM analysis for candidates scoring < 30% overall  (saves ~40% of calls)
@@ -26,7 +26,7 @@ from app.config import settings
 LLM_ANALYSIS_MIN_SCORE = 30.0
 
 
-# ── LLM output schema ─────────────────────────────────────────────────────────
+# â”€â”€ LLM output schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class MatchAnalysisOutput(BaseModel):
     strengths: List[str] = Field(default_factory=list)
@@ -39,7 +39,7 @@ class MatchAnalysisOutput(BaseModel):
         return coerce_llm_output(cls, v)
 
 
-# Compressed prompt — ~50 token system message
+# Compressed prompt â€” ~50 token system message
 MATCH_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -64,7 +64,7 @@ Missing: {missing_skills}""",
 ])
 
 
-# ── Scoring helpers ───────────────────────────────────────────────────────────
+# â”€â”€ Scoring helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9+#.]", " ", text.lower()).strip()
@@ -188,12 +188,12 @@ def _enrich_with_llm(score: MatchScore, profile: CandidateProfile, jd: dict) -> 
     """Add LLM strengths/weaknesses/summary. Skipped for low scorers."""
     if score["overall_score"] < LLM_ANALYSIS_MIN_SCORE:
         score["analysis_summary"] = (
-            f"Score {score['overall_score']:.1f}/100 — below threshold for detailed analysis."
+            f"Score {score['overall_score']:.1f}/100 â€” below threshold for detailed analysis."
         )
         return score
 
     try:
-        # Build compact summaries — cap lengths to save tokens
+        # Build compact summaries â€” cap lengths to save tokens
         work_parts = []
         for j in profile.get("work_experience", [])[:2]:
             if isinstance(j, dict):
@@ -216,7 +216,7 @@ def _enrich_with_llm(score: MatchScore, profile: CandidateProfile, jd: dict) -> 
                 edu_summary = f"{e.get('degree','')} {e.get('field_of_study','')}"
 
         llm = get_llm(temperature=0.1, max_tokens=500)
-        chain = MATCH_ANALYSIS_PROMPT | llm.with_structured_output(MatchAnalysisOutput)
+        chain = MATCH_ANALYSIS_PROMPT | llm.with_structured_output(MatchAnalysisOutput, method="function_calling")
 
         result: MatchAnalysisOutput = chain.invoke({
             "jd_title":          jd.get("title", ""),

@@ -13,15 +13,23 @@ class Settings(BaseSettings):
     DATABASE_SYNC_URL: str = "postgresql://postgres:password@localhost:5432/jd_analyser"
 
     # AI Provider
-    AI_PROVIDER: str = "deepseek"  # "openai" | "google" | "deepseek"
+    AI_PROVIDER: str = "groq"  # "groq" | "openai" | "google" | "deepseek"
+
+    # Groq (free tier, OpenAI-compatible)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # Google Gemini
+    GOOGLE_API_KEY: Optional[str] = None
+    GOOGLE_MODEL: str = "gemini-2.0-flash"
+
+    # OpenAI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o"
-    GOOGLE_API_KEY: Optional[str] = None
-    GOOGLE_MODEL: str = "gemini-2.5-pro"
 
-    # DeepSeek (OpenAI-compatible API)
+    # DeepSeek
     DEEPSEEK_API_KEY: Optional[str] = None
-    DEEPSEEK_MODEL: str = "deepseek-chat"          # or "deepseek-reasoner"
+    DEEPSEEK_MODEL: str = "deepseek-chat"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
 
     # Embeddings

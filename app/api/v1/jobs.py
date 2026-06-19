@@ -43,7 +43,6 @@ async def _extract_text_from_file(file_path: str, file_type: str) -> str:
 
 @router.post("", response_model=JobDescriptionResponse, status_code=201)
 async def create_job_description(
-    background_tasks: BackgroundTasks,
     title: str = Form(..., description="Job title"),
     company_name: Optional[str] = Form(None),
     description_text: Optional[str] = Form(None, description="Raw JD text (if not uploading a file)"),
@@ -54,6 +53,10 @@ async def create_job_description(
     """
     Create a new Job Description. Provide either raw text or a file upload.
     """
+    # Treat empty string from Swagger the same as not provided
+    if description_text is not None and not description_text.strip():
+        description_text = None
+
     if not description_text and not file:
         raise HTTPException(status_code=400, detail="Provide either description_text or a file")
 
@@ -63,12 +66,28 @@ async def create_job_description(
             saved_path, _, _, file_type = await file_service.save_jd_file(file)
             file_path = saved_path
             extracted_text = await _extract_text_from_file(saved_path, file_type)
-            description_text = extracted_text if not description_text else description_text
+            # File text takes priority; fall back to description_text only if extraction is empty
+            if extracted_text and extracted_text.strip():
+                description_text = extracted_text
+            elif not description_text:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Could not extract text from the uploaded file. "
+                        "The file may be a scanned image PDF with no selectable text. "
+                        "Please use a text-based PDF/DOCX or paste the JD text directly."
+                    ),
+                )
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to process JD file: {str(e)}")
 
-    if not description_text or len(description_text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Job description text is too short")
+    if not description_text or len(description_text.strip()) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Job description text is too short (minimum 50 characters). Please provide the full JD.",
+        )
 
     jd = JobDescription(
         title=title,
@@ -83,8 +102,11 @@ async def create_job_description(
 
     logger.info(f"Created JD: {jd.id} — {jd.title!r}")
 
-    # Auto-analyze JD in background so structured fields populate immediately
-    background_tasks.add_task(analyze_jd_only, jd.id)
+    # Run JD analysis synchronously so all structured fields are populated in the response
+    await analyze_jd_only(jd.id)
+
+    # Re-fetch to get the fields written by analyze_jd_only (uses its own session)
+    await db.refresh(jd)
 
     result = _jd_to_response(jd, total_resumes=0, processed_resumes=0)
     return result

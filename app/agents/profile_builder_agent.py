@@ -1,11 +1,11 @@
-"""
-Profile Builder Agent — Node 3.
+﻿"""
+Profile Builder Agent â€” Node 3.
 
 BIGGEST token consumer (1 LLM call per resume).
 Optimisations applied:
   - PRE-FILTER: skip LLM entirely if keyword hit-rate < 10% (saves ~60% of calls at 500+ resumes)
-  - System prompt compressed ~65% (200 → 70 tokens)
-  - Resume text capped at 3500 chars (was 8000) — saves ~1125 tokens/call
+  - System prompt compressed ~65% (200 â†’ 70 tokens)
+  - Resume text capped at 3500 chars (was 8000) â€” saves ~1125 tokens/call
   - Text preprocessed before sending (strip noise, repeated blanks)
   - max_tokens=800 output cap
   - Schema field descriptions removed (they cost tokens, LLM uses field names)
@@ -36,7 +36,7 @@ _YEARS_RE = re.compile(r'(\d+)\+?\s*(?:years?|yrs?)(?:\s+of)?\s+(?:experience|ex
 
 def _name_from_email(email: Optional[str]) -> Optional[str]:
     """Derive a display name from an email address when full_name is unavailable.
-    e.g. john.doe@gmail.com → 'John Doe', john_doe@company.com → 'John Doe'
+    e.g. john.doe@gmail.com â†’ 'John Doe', john_doe@company.com â†’ 'John Doe'
     """
     if not email or "@" not in email:
         return None
@@ -131,7 +131,7 @@ class CandidateProfileOutput(BaseModel):
         return coerce_llm_output(cls, v)
 
 
-# ── Compressed prompt (~70 token system message vs ~200 before) ───────────────
+# â”€â”€ Compressed prompt (~70 token system message vs ~200 before) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 PROFILE_PROMPT = ChatPromptTemplate.from_messages([
     (
@@ -182,7 +182,7 @@ def _extract_basic_profile(resume: ResumeData, required_skills: List[str], prefe
 
     embedding = embedding_service.embed_document(raw[:512].strip()) if raw.strip() else None
 
-    logger.debug(f"[Profile][Pre-filter] {resume['filename']} — skills_found={len(found_skills)}/{len(required_skills)} years={total_years}")
+    logger.debug(f"[Profile][Pre-filter] {resume['filename']} â€” skills_found={len(found_skills)}/{len(required_skills)} years={total_years}")
 
     return CandidateProfile(
         resume_id=resume["resume_id"],
@@ -211,13 +211,13 @@ def _build_profile(resume: ResumeData, required_skills: List[str] = (), preferre
         return _extract_basic_profile(resume, list(required_skills), list(preferred_skills))
 
     try:
-        # Preprocess + trim — biggest token saving
+        # Preprocess + trim â€” biggest token saving
         resume_text = trim_text(raw, max_chars=3500)
         est = estimate_tokens(resume_text)
         logger.debug(f"[Profile] {resume['filename']} | ~{est} input tokens")
 
         llm = get_llm(temperature=0.0, max_tokens=2000)
-        chain = PROFILE_PROMPT | llm.with_structured_output(CandidateProfileOutput)
+        chain = PROFILE_PROMPT | llm.with_structured_output(CandidateProfileOutput, method="function_calling")
         result: CandidateProfileOutput = chain.invoke({"resume_text": resume_text})
 
         all_jobs   = [e.model_dump() for e in result.work_experience]
