@@ -25,7 +25,6 @@ from app.config import settings
 # All candidates get full LLM analysis regardless of score
 LLM_ANALYSIS_MIN_SCORE = 0.0
 
-
 # â”€â”€ LLM output schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class MatchAnalysisOutput(BaseModel):
@@ -185,13 +184,6 @@ def _compute_scores(profile: CandidateProfile, jd: dict, jd_emb: List[float]) ->
 
 
 def _enrich_with_llm(score: MatchScore, profile: CandidateProfile, jd: dict) -> MatchScore:
-    """Add LLM strengths/weaknesses/summary. Skipped for low scorers."""
-    if score["overall_score"] < LLM_ANALYSIS_MIN_SCORE:
-        score["analysis_summary"] = (
-            f"Score {score['overall_score']:.1f}/100 â€” below threshold for detailed analysis."
-        )
-        return score
-
     try:
         # Build compact summaries â€” cap lengths to save tokens
         work_parts = []
@@ -246,7 +238,7 @@ def _enrich_with_llm(score: MatchScore, profile: CandidateProfile, jd: dict) -> 
         return {**score, "strengths": result.strengths, "weaknesses": result.weaknesses, "analysis_summary": result.analysis_summary}
 
     except Exception as e:
-        logger.warning(f"[Matching] LLM enrichment failed for {score['resume_id']}: {e}", exc_info=True)
+        logger.warning("[Matching] LLM enrichment failed for {}: {}", score["resume_id"], str(e))
         return score
 
 
@@ -273,7 +265,6 @@ def matching_node(state: RecruitmentState) -> RecruitmentState:
 
     logger.info(
         f"[Matching] {len(valid)} candidates | "
-        f"LLM skip if score<{LLM_ANALYSIS_MIN_SCORE} | "
         f"entry={jd.get('is_entry_level')} freshers={jd.get('accepts_freshers')}"
     )
 
@@ -295,9 +286,8 @@ def matching_node(state: RecruitmentState) -> RecruitmentState:
             for f in as_completed(futures):
                 scores.append(f.result())
 
-    llm_called = sum(1 for s in scores if s.get("overall_score", 0) >= LLM_ANALYSIS_MIN_SCORE and s.get("candidate_tier") != "unknown")
-    llm_skipped = len(valid) - llm_called
-    logger.info(f"[Matching] Done | LLM called={llm_called} skipped={llm_skipped} (score<{LLM_ANALYSIS_MIN_SCORE})")
+    llm_called = sum(1 for s in scores if s.get("candidate_tier") != "unknown")
+    logger.info(f"[Matching] Done | LLM called={llm_called} for {len(valid)} valid candidates")
 
     return {
         **state,
@@ -306,6 +296,5 @@ def matching_node(state: RecruitmentState) -> RecruitmentState:
             **state.get("processing_stats", {}),
             "candidates_scored": len(scores),
             "matching_llm_calls": llm_called,
-            "matching_llm_skipped": llm_skipped,
         },
     }

@@ -190,7 +190,7 @@ def _full_rec(score: MatchScore, profile_lookup: dict, jd: dict) -> CandidateRec
         )
 
     except Exception as e:
-        logger.warning(f"[Recommendation] LLM failed for {score['resume_id']}: {e}", exc_info=True)
+        logger.warning("[Recommendation] LLM failed for {}: {}", score["resume_id"], str(e))
         return _simple_rec(score, profile_lookup)
 
 
