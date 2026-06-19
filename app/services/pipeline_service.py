@@ -138,6 +138,7 @@ async def analyze_jd_only(
                     salary_range=salary_dict,
                     industry=analysis.get("industry"),
                     embedding=result_state.get("jd_embedding"),
+                    status=JDStatus.COMPLETED,
                 )
             )
             await db.commit()
@@ -149,6 +150,13 @@ async def analyze_jd_only(
 
         except Exception as e:
             logger.error(f"[JD Analysis] Failed for JD={jd_id_str}: {e}", exc_info=True)
+            async with AsyncSessionLocal() as err_db:
+                await err_db.execute(
+                    update(JobDescription)
+                    .where(JobDescription.id == job_description_id)
+                    .values(status=JDStatus.FAILED, error_message=str(e)[:1000])
+                )
+                await err_db.commit()
 
 
 async def execute_pipeline(
