@@ -30,6 +30,7 @@ class CandidateStatusUpdate(BaseModel):
 class CandidateStatusItem(BaseModel):
     candidate_profile_id: uuid.UUID
     resume_id: uuid.UUID
+    jd_id: Optional[uuid.UUID] = None
     full_name: Optional[str]
     email: Optional[str]
     location: Optional[str]
@@ -83,6 +84,7 @@ async def _list_by_status_global(
         CandidateStatusItem(
             candidate_profile_id=p.id,
             resume_id=p.resume_id,
+            jd_id=p.job_description_id,
             full_name=p.full_name,
             email=p.email,
             location=p.location,
@@ -148,6 +150,71 @@ async def list_pending_candidates(
     return await _list_by_status_global("pending", page, page_size, db)
 
 
+@router.get("/{jd_id}/accepted", response_model=CandidateStatusListResponse)
+async def list_accepted_candidates_by_jd(
+    jd_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """List all accepted candidates for a specific Job Description."""
+    jd = (await db.execute(select(JobDescription).where(JobDescription.id == jd_id))).scalar_one_or_none()
+    if not jd:
+        raise HTTPException(status_code=404, detail="Job description not found")
+
+    query = (
+        select(CandidateProfile)
+        .where(
+            CandidateProfile.job_description_id == jd_id,
+            CandidateProfile.status == CandidateStatus.ACCEPTED,
+        )
+    )
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+
+    profiles = (await db.execute(
+        query.order_by(CandidateProfile.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )).scalars().all()
+
+    profile_ids = [p.id for p in profiles]
+    mrs = {}
+    if profile_ids:
+        mr_rows = (await db.execute(
+            select(MatchResult).where(
+                MatchResult.candidate_profile_id.in_(profile_ids),
+                MatchResult.status == MatchStatus.COMPLETED,
+            )
+        )).scalars().all()
+        mrs = {str(mr.candidate_profile_id): mr for mr in mr_rows}
+
+    items = [
+        CandidateStatusItem(
+            candidate_profile_id=p.id,
+            resume_id=p.resume_id,
+            jd_id=p.job_description_id,
+            full_name=p.full_name,
+            email=p.email,
+            location=p.location,
+            total_years_experience=p.total_years_experience,
+            overall_score=mrs[str(p.id)].overall_score if str(p.id) in mrs else None,
+            rank=mrs[str(p.id)].rank if str(p.id) in mrs else None,
+            status=p.status.value,
+        )
+        for p in profiles
+    ]
+
+    return CandidateStatusListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=math.ceil(total / page_size) if total > 0 else 1,
+    )
+
+
 @router.get("/{jd_id}", response_model=CandidateStatusListResponse)
 async def list_candidates_with_status(
     jd_id: uuid.UUID,
@@ -197,6 +264,7 @@ async def list_candidates_with_status(
         items.append(CandidateStatusItem(
             candidate_profile_id=p.id,
             resume_id=p.resume_id,
+            jd_id=p.job_description_id,
             full_name=p.full_name,
             email=p.email,
             location=p.location,
@@ -250,6 +318,7 @@ async def update_candidate_status(
     return CandidateStatusItem(
         candidate_profile_id=profile.id,
         resume_id=profile.resume_id,
+        job_description_id=profile.job_description_id,
         full_name=profile.full_name,
         email=profile.email,
         location=profile.location,

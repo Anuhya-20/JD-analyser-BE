@@ -22,8 +22,8 @@ from app.services.embedding_service import embedding_service
 from app.utils.token_utils import trim_list, coerce_llm_output
 from app.config import settings
 
-# Candidates below this score skip the LLM analysis call entirely
-LLM_ANALYSIS_MIN_SCORE = 30.0
+# All candidates get full LLM analysis regardless of score
+LLM_ANALYSIS_MIN_SCORE = 0.0
 
 
 # â”€â”€ LLM output schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
