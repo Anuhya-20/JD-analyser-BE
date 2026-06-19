@@ -60,6 +60,9 @@ class MatchResult(Base, UUIDMixin, TimestampMixin):
     recommendation: Mapped[Optional["Recommendation"]] = relationship(
         "Recommendation", back_populates="match_result", uselist=False, cascade="all, delete-orphan"
     )
+    interview_sessions: Mapped[list["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="match_result"
+    )
 
     __table_args__ = (
         Index("ix_match_results_job_description_id", "job_description_id"),

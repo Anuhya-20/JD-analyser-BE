@@ -275,8 +275,8 @@ def _build_profile(resume: ResumeData, required_skills: List[str] = (), preferre
         )
 
     except Exception as e:
-        logger.warning(f"[Profile] Failed {resume['resume_id']}: {e}")
-        return _empty_profile(resume["resume_id"], str(e))
+        logger.warning(f"[Profile] LLM failed for {resume['resume_id']}: {e} — falling back to basic profile")
+        return _extract_basic_profile(resume, list(required_skills), list(preferred_skills))
 
 
 def _empty_profile(resume_id: str, error: str) -> CandidateProfile:

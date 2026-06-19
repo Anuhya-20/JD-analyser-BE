@@ -70,10 +70,12 @@ async def analyze_jd_only(
 ) -> None:
     """
     Run ONLY the JD analysis node (no resumes needed).
-    Called as a background task on JD creation so that structured fields
-    (required_skills, experience_level, etc.) are populated immediately.
+    Called on JD creation so structured fields are populated immediately.
     Creates its own session — safe to run as a BackgroundTask.
+    Sets JDStatus.COMPLETED on success, JDStatus.FAILED (with error_message) on failure.
     """
+    import asyncio
+
     jd_id_str = str(job_description_id)
     logger.info(f"[JD Analysis] Auto-analyzing JD={jd_id_str}")
 
@@ -87,12 +89,19 @@ async def analyze_jd_only(
                 logger.error(f"[JD Analysis] JD {jd_id_str} not found")
                 return
 
-            # Skip if already analyzed (idempotent)
+            # Idempotent — skip if already analyzed
             if jd.required_skills:
                 logger.info(f"[JD Analysis] Already analyzed — skipping")
                 return
 
-            import asyncio
+            # Mark as in-progress so callers can detect stuck analyses
+            await db.execute(
+                update(JobDescription)
+                .where(JobDescription.id == job_description_id)
+                .values(status=JDStatus.ANALYZING)
+            )
+            await db.commit()
+
             state: RecruitmentState = {
                 "job_description_id": jd_id_str,
                 "job_description_text": jd.description_text,
@@ -108,12 +117,21 @@ async def analyze_jd_only(
                 "processing_stats": {},
             }
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result_state = await loop.run_in_executor(None, jd_analysis_node, state)
 
             analysis = result_state.get("jd_analysis")
+            agent_errors = result_state.get("errors", [])
+
             if not analysis:
-                logger.warning(f"[JD Analysis] No analysis returned for JD={jd_id_str}")
+                err_msg = "; ".join(agent_errors) if agent_errors else "LLM returned no structured output"
+                logger.warning(f"[JD Analysis] No analysis for JD={jd_id_str}: {err_msg}")
+                await db.execute(
+                    update(JobDescription)
+                    .where(JobDescription.id == job_description_id)
+                    .values(status=JDStatus.FAILED, error_message=err_msg[:1000])
+                )
+                await db.commit()
                 return
 
             salary = analysis.get("salary_range")
@@ -138,6 +156,8 @@ async def analyze_jd_only(
                     salary_range=salary_dict,
                     industry=analysis.get("industry"),
                     embedding=result_state.get("jd_embedding"),
+                    status=JDStatus.COMPLETED,
+                    error_message=None,
                 )
             )
             await db.commit()
@@ -149,6 +169,16 @@ async def analyze_jd_only(
 
         except Exception as e:
             logger.error(f"[JD Analysis] Failed for JD={jd_id_str}: {e}", exc_info=True)
+            try:
+                async with AsyncSessionLocal() as err_db:
+                    await err_db.execute(
+                        update(JobDescription)
+                        .where(JobDescription.id == job_description_id)
+                        .values(status=JDStatus.FAILED, error_message=str(e)[:1000])
+                    )
+                    await err_db.commit()
+            except Exception:
+                pass
 
 
 async def execute_pipeline(

@@ -53,6 +53,9 @@ class JobDescription(Base, UUIDMixin, TimestampMixin):
     match_results: Mapped[List["MatchResult"]] = relationship(
         "MatchResult", back_populates="job_description", cascade="all, delete-orphan"
     )
+    interview_sessions: Mapped[List["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="job_description", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_job_descriptions_status", "status"),

@@ -4,6 +4,7 @@ from app.models.candidate_profile import CandidateProfile, CandidateStatus
 from app.models.match_result import MatchResult
 from app.models.recommendation import Recommendation
 from app.models.hr_user import HRUser
+from app.models.interview_session import InterviewSession
 
 __all__ = [
     "JobDescription",
@@ -12,4 +13,5 @@ __all__ = [
     "MatchResult",
     "Recommendation",
     "HRUser",
+    "InterviewSession",
 ]

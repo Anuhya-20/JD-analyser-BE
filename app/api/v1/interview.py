@@ -2,6 +2,8 @@
 Interview question generation — tailored questions for accepted candidates.
 Generates 5 Technical + 4 Behavioral + 3 Scenario-Based questions using
 the JD requirements and candidate's resume profile as context.
+Questions are persisted in the interview_sessions table with direct FK
+relations to candidate_profile, job_description, match_result, and hr_user.
 """
 from __future__ import annotations
 import uuid
@@ -12,7 +14,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from pydantic import BaseModel
 from loguru import logger
 
@@ -20,6 +22,8 @@ from app.database import get_db
 from app.models.hr_user import HRUser
 from app.models.job_description import JobDescription
 from app.models.candidate_profile import CandidateProfile, CandidateStatus
+from app.models.match_result import MatchResult, MatchStatus
+from app.models.interview_session import InterviewSession
 from app.core.deps import get_current_hr_user
 from app.agents.llm_factory import get_llm
 
@@ -30,21 +34,26 @@ router = APIRouter()
 
 class InterviewQuestion(BaseModel):
     question: str
-    purpose: str  # what competency this question assesses
+    purpose: str
 
 
 class InterviewQuestionsResponse(BaseModel):
+    id: uuid.UUID
     jd_id: uuid.UUID
     profile_id: uuid.UUID
+    match_result_id: Optional[uuid.UUID]
+    generated_by_id: Optional[uuid.UUID]
     candidate_name: Optional[str]
     job_title: str
+    round_label: Optional[str]
     technical_questions: List[InterviewQuestion]
     behavioral_questions: List[InterviewQuestion]
     scenario_questions: List[InterviewQuestion]
     total_questions: int
 
+    model_config = {"from_attributes": True}
 
-# Internal model for LLM structured output
+
 class _LLMQuestions(BaseModel):
     technical_questions: List[InterviewQuestion]
     behavioral_questions: List[InterviewQuestion]
@@ -153,13 +162,10 @@ Return ONLY valid JSON with this exact structure — no markdown, no commentary:
 
 
 def _extract_json(raw: str) -> dict:
-    """Strip markdown fences and parse JSON from LLM response."""
     text = raw.strip()
-    # Remove ```json ... ``` or ``` ... ``` wrappers
     match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
     if match:
         text = match.group(1).strip()
-    # Find the outermost { ... } block
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -169,37 +175,59 @@ def _extract_json(raw: str) -> dict:
 
 async def _call_llm(prompt: str) -> _LLMQuestions:
     llm = get_llm(temperature=0.7, max_tokens=2048)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     response = await loop.run_in_executor(None, llm.invoke, prompt)
     raw = response.content if hasattr(response, "content") else str(response)
     data = _extract_json(raw)
     return _LLMQuestions(**data)
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+def _session_to_response(
+    session: InterviewSession,
+    profile: CandidateProfile,
+    jd: JobDescription,
+) -> InterviewQuestionsResponse:
+    return InterviewQuestionsResponse(
+        id=session.id,
+        jd_id=session.job_description_id,
+        profile_id=session.candidate_profile_id,
+        match_result_id=session.match_result_id,
+        generated_by_id=session.generated_by_id,
+        candidate_name=profile.full_name,
+        job_title=jd.title,
+        round_label=session.round_label,
+        technical_questions=[InterviewQuestion(**q) for q in (session.technical_questions or [])],
+        behavioral_questions=[InterviewQuestion(**q) for q in (session.behavioral_questions or [])],
+        scenario_questions=[InterviewQuestion(**q) for q in (session.scenario_questions or [])],
+        total_questions=session.total_questions,
+    )
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/{jd_id}/{profile_id}", response_model=InterviewQuestionsResponse)
 async def generate_interview_questions(
     jd_id: uuid.UUID,
     profile_id: uuid.UUID,
+    round_label: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: HRUser = Depends(get_current_hr_user),
 ):
     """
-    Generate tailored interview questions for an accepted candidate.
+    Generate and **persist** tailored interview questions for an accepted candidate.
 
-    - **5 Technical Questions** — skills depth and JD requirements
-    - **4 Behavioral Questions** — STAR-format, based on work history and JD responsibilities
-    - **3 Scenario-Based Questions** — hypothetical role-specific situations
+    - **5 Technical** — skills depth and JD requirements
+    - **4 Behavioral** — STAR-format, based on work history
+    - **3 Scenario-Based** — hypothetical role-specific situations
 
-    The candidate must have status = `accepted`. Raises 400 otherwise.
+    Questions are stored in `interview_sessions` with FK relations to:
+    candidate_profile, job_description, match_result, and hr_user.
+    Re-calling this endpoint overwrites the previous session for this candidate+JD pair.
     """
-    # Validate JD
     jd = (await db.execute(select(JobDescription).where(JobDescription.id == jd_id))).scalar_one_or_none()
     if not jd:
         raise HTTPException(status_code=404, detail="Job description not found")
 
-    # Validate candidate profile
     profile = (await db.execute(
         select(CandidateProfile).where(CandidateProfile.id == profile_id)
     )).scalar_one_or_none()
@@ -218,27 +246,109 @@ async def generate_interview_questions(
             detail="This candidate profile does not belong to the specified job description",
         )
 
+    # Resolve match_result_id for the FK link
+    mr = (await db.execute(
+        select(MatchResult).where(
+            MatchResult.candidate_profile_id == profile_id,
+            MatchResult.status == MatchStatus.COMPLETED,
+        )
+    )).scalar_one_or_none()
+
     logger.info(f"Generating interview questions | jd={jd_id} profile={profile_id} user={current_user.email}")
 
-    prompt = _build_prompt(jd, profile)
-
     try:
-        questions = await _call_llm(prompt)
+        questions = await _call_llm(_build_prompt(jd, profile))
     except Exception as exc:
         logger.error(f"LLM error generating interview questions for profile={profile_id}: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to generate interview questions: {exc}")
 
-    return InterviewQuestionsResponse(
-        jd_id=jd_id,
-        profile_id=profile_id,
-        candidate_name=profile.full_name,
-        job_title=jd.title,
-        technical_questions=questions.technical_questions,
-        behavioral_questions=questions.behavioral_questions,
-        scenario_questions=questions.scenario_questions,
-        total_questions=(
-            len(questions.technical_questions)
-            + len(questions.behavioral_questions)
-            + len(questions.scenario_questions)
-        ),
+    total = (
+        len(questions.technical_questions)
+        + len(questions.behavioral_questions)
+        + len(questions.scenario_questions)
     )
+
+    # Upsert: delete existing session for this candidate+JD pair, then insert fresh
+    existing = (await db.execute(
+        select(InterviewSession).where(
+            InterviewSession.candidate_profile_id == profile_id,
+            InterviewSession.job_description_id == jd_id,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        await db.delete(existing)
+        await db.flush()
+
+    session = InterviewSession(
+        candidate_profile_id=profile_id,
+        job_description_id=jd_id,
+        match_result_id=mr.id if mr else None,
+        generated_by_id=current_user.id,
+        technical_questions=[q.model_dump() for q in questions.technical_questions],
+        behavioral_questions=[q.model_dump() for q in questions.behavioral_questions],
+        scenario_questions=[q.model_dump() for q in questions.scenario_questions],
+        total_questions=total,
+        round_label=round_label,
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+
+    logger.info(f"Saved interview session {session.id} | {total} questions | profile={profile_id}")
+
+    return _session_to_response(session, profile, jd)
+
+
+@router.get("/{jd_id}/{profile_id}", response_model=InterviewQuestionsResponse)
+async def get_interview_questions(
+    jd_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """Retrieve previously generated interview questions for a candidate."""
+    session = (await db.execute(
+        select(InterviewSession).where(
+            InterviewSession.candidate_profile_id == profile_id,
+            InterviewSession.job_description_id == jd_id,
+        )
+    )).scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="No interview questions found. Call POST first to generate them.",
+        )
+
+    jd = (await db.execute(select(JobDescription).where(JobDescription.id == jd_id))).scalar_one_or_none()
+    profile = (await db.execute(
+        select(CandidateProfile).where(CandidateProfile.id == profile_id)
+    )).scalar_one_or_none()
+
+    return _session_to_response(session, profile, jd)
+
+
+@router.get("/{jd_id}", response_model=List[InterviewQuestionsResponse])
+async def list_interview_sessions_for_jd(
+    jd_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """List all saved interview sessions for a job description."""
+    jd = (await db.execute(select(JobDescription).where(JobDescription.id == jd_id))).scalar_one_or_none()
+    if not jd:
+        raise HTTPException(status_code=404, detail="Job description not found")
+
+    sessions = (await db.execute(
+        select(InterviewSession).where(InterviewSession.job_description_id == jd_id)
+    )).scalars().all()
+
+    results = []
+    for s in sessions:
+        profile = (await db.execute(
+            select(CandidateProfile).where(CandidateProfile.id == s.candidate_profile_id)
+        )).scalar_one_or_none()
+        if profile:
+            results.append(_session_to_response(s, profile, jd))
+    return results

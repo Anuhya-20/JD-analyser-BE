@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     BATCH_SIZE: int = 10
     MAX_RESUME_PROCESSING_WORKERS: int = 20
 
+    # Minimum overall score (0-100) a candidate must reach to receive LLM enrichment.
+    # Set to 0.0 to give ALL candidates full strengths/weaknesses analysis.
+    SCORE_MIN_FOR_LLM_ANALYSIS: float = 0.0
+
+    # Scoring Weights — experienced candidates (must sum to 1.0)
+    SCORE_WEIGHT_SKILL: float = 0.70
+    SCORE_WEIGHT_EXPERIENCE: float = 0.10
+    SCORE_WEIGHT_EDUCATION: float = 0.10
+    SCORE_WEIGHT_SEMANTIC: float = 0.10
+
+    # Scoring Weights — fresher on entry-level JD (must sum to 1.0)
+    SCORE_WEIGHT_SKILL_FRESHER: float = 0.70
+    SCORE_WEIGHT_EXPERIENCE_FRESHER: float = 0.05
+    SCORE_WEIGHT_EDUCATION_FRESHER: float = 0.15
+    SCORE_WEIGHT_SEMANTIC_FRESHER: float = 0.10
+
     class Config:
         env_file = ".env"
         case_sensitive = True

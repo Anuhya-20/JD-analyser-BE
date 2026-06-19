@@ -41,6 +41,41 @@ async def _extract_text_from_file(file_path: str, file_type: str) -> str:
     return text
 
 
+@router.post("/from-text", response_model=JobDescriptionResponse, status_code=201)
+async def create_job_description_from_text(
+    payload: JobDescriptionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """
+    Create a Job Description from a JSON body (plain text paste).
+    Use this endpoint when submitting a JD as plain text without a file upload.
+    """
+    text = payload.description_text.strip()
+    if len(text) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Job description text is too short (minimum 50 characters).",
+        )
+
+    jd = JobDescription(
+        title=payload.title,
+        company_name=payload.company_name,
+        description_text=text,
+        status=JDStatus.PENDING,
+    )
+    db.add(jd)
+    await db.commit()
+    await db.refresh(jd)
+
+    logger.info(f"Created JD (from-text): {jd.id} — {jd.title!r}")
+
+    await analyze_jd_only(jd.id)
+    await db.refresh(jd)
+
+    return _jd_to_response(jd, total_resumes=0, processed_resumes=0)
+
+
 @router.post("", response_model=JobDescriptionResponse, status_code=201)
 async def create_job_description(
     title: str = Form(..., description="Job title"),
