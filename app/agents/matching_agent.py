@@ -2,7 +2,7 @@
 Matching Agent â€” Node 4.
 
 Token optimisations:
-  - SKIP LLM analysis for candidates scoring < 30% overall  (saves ~40% of calls)
+  - LLM analysis gated by SCORE_MIN_FOR_LLM_ANALYSIS (default 0.0 = all candidates)
   - Compressed system prompt (~50 tokens vs ~100 before)
   - All list inputs capped at 8 items before sending
   - max_tokens=350 output cap (strengths + weaknesses + summary is short)
@@ -139,8 +139,18 @@ def _education_score(jd_reqs: List[str], edu_level: Optional[str], gpa: Optional
 
 def _get_weights(is_fresher: bool, jd_is_entry_level: bool) -> dict:
     if is_fresher and jd_is_entry_level:
-        return {"skill": 0.30, "education": 0.30, "semantic": 0.25, "experience": 0.15}
-    return {"skill": 0.35, "experience": 0.25, "semantic": 0.25, "education": 0.15}
+        return {
+            "skill":      settings.SCORE_WEIGHT_SKILL_FRESHER,
+            "experience": settings.SCORE_WEIGHT_EXPERIENCE_FRESHER,
+            "education":  settings.SCORE_WEIGHT_EDUCATION_FRESHER,
+            "semantic":   settings.SCORE_WEIGHT_SEMANTIC_FRESHER,
+        }
+    return {
+        "skill":      settings.SCORE_WEIGHT_SKILL,
+        "experience": settings.SCORE_WEIGHT_EXPERIENCE,
+        "education":  settings.SCORE_WEIGHT_EDUCATION,
+        "semantic":   settings.SCORE_WEIGHT_SEMANTIC,
+    }
 
 
 def _compute_scores(profile: CandidateProfile, jd: dict, jd_emb: List[float]) -> MatchScore:
@@ -253,7 +263,8 @@ def _process_one(profile: CandidateProfile, jd: dict, jd_emb: List[float]) -> Ma
             candidate_tier="unknown", rank=None,
         )
     score = _compute_scores(profile, jd, jd_emb)
-    score = _enrich_with_llm(score, profile, jd)
+    if score["overall_score"] >= settings.SCORE_MIN_FOR_LLM_ANALYSIS:
+        score = _enrich_with_llm(score, profile, jd)
     return score
 
 

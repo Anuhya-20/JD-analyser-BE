@@ -26,7 +26,14 @@ class ResumeResponse(BaseModel):
 
     # Match result fields
     overall_score: Optional[float] = None
+    skill_match_score: Optional[float] = None
+    experience_score: Optional[float] = None
+    education_score: Optional[float] = None
+    semantic_similarity_score: Optional[float] = None
     rank: Optional[int] = None
+
+    # Recommendation
+    recommendation_level: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

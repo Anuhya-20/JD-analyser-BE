@@ -19,6 +19,7 @@ from app.models.job_description import JobDescription, JDStatus
 from app.models.resume import Resume, ResumeStatus
 from app.models.candidate_profile import CandidateProfile
 from app.models.match_result import MatchResult
+from app.models.recommendation import Recommendation
 from app.models.hr_user import HRUser
 from app.core.deps import get_current_hr_user
 from app.schemas.resume import ResumeResponse, ResumeListResponse, BulkUploadResponse
@@ -271,7 +272,7 @@ async def list_resumes(
     count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total = count_result.scalar_one()
 
-    # Single query: resumes + candidate profile + match result (LEFT JOINs)
+    # Single query: resumes + candidate profile + match result + recommendation (LEFT JOINs)
     enriched_query = (
         select(
             Resume,
@@ -280,11 +281,17 @@ async def list_resumes(
             CandidateProfile.email,
             CandidateProfile.status.label("cp_status"),
             MatchResult.overall_score,
+            MatchResult.skill_match_score,
+            MatchResult.experience_score,
+            MatchResult.education_score,
+            MatchResult.semantic_similarity_score,
             MatchResult.rank,
+            Recommendation.level.label("rec_level"),
         )
         .where(Resume.job_description_id == jd_id)
         .outerjoin(CandidateProfile, CandidateProfile.resume_id == Resume.id)
         .outerjoin(MatchResult, MatchResult.candidate_profile_id == CandidateProfile.id)
+        .outerjoin(Recommendation, Recommendation.match_result_id == MatchResult.id)
         .order_by(
             MatchResult.rank.asc().nulls_last(),
             Resume.created_at.desc(),
@@ -309,7 +316,22 @@ async def list_resumes(
         data.candidate_email = row[3]
         data.candidate_status = row[4].value if row[4] else None
         data.overall_score = row[5]
-        data.rank = row[6]
+        data.skill_match_score = row[6]
+        data.experience_score = row[7]
+        data.education_score = row[8]
+        data.semantic_similarity_score = row[9]
+        data.rank = row[10]
+        # Use stored recommendation level if available; otherwise derive from score
+        if row[11]:
+            data.recommendation_level = row[11].value
+        elif row[5] is not None:
+            score = row[5]
+            if score >= 70:
+                data.recommendation_level = "strongly_recommended"
+            elif score >= 50:
+                data.recommendation_level = "recommended"
+            else:
+                data.recommendation_level = "maybe"
         items.append(data)
 
     return ResumeListResponse(

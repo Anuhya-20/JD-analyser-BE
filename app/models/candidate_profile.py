@@ -71,6 +71,9 @@ class CandidateProfile(Base, UUIDMixin, TimestampMixin):
     match_result: Mapped[Optional["MatchResult"]] = relationship(
         "MatchResult", back_populates="candidate_profile", uselist=False, cascade="all, delete-orphan"
     )
+    interview_sessions: Mapped[list["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="candidate_profile", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_candidate_profiles_job_description_id", "job_description_id"),
