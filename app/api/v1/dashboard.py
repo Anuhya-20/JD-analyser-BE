@@ -136,8 +136,21 @@ async def get_global_dashboard(
         .group_by(cast(MatchResult.created_at, Date))
     )).all()
 
+    shortlisted_by_day = (await db.execute(
+        select(
+            cast(CandidateProfile.updated_at, Date).label("day"),
+            func.count(CandidateProfile.id).label("cnt"),
+        )
+        .where(
+            CandidateProfile.updated_at >= week_start,
+            CandidateProfile.status == CandidateStatus.ACCEPTED,
+        )
+        .group_by(cast(CandidateProfile.updated_at, Date))
+    )).all()
+
     resume_map = {str(r.day): r.cnt for r in resumes_by_day}
     match_map = {str(m.day): m.cnt for m in matches_by_day}
+    shortlist_map = {str(s.day): s.cnt for s in shortlisted_by_day}
 
     DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     weekly_activity = []
@@ -149,6 +162,7 @@ async def get_global_dashboard(
             date=day_str,
             resumes=resume_map.get(day_str, 0),
             matches=match_map.get(day_str, 0),
+            shortlisted=shortlist_map.get(day_str, 0),
         ))
 
     # ── Candidate pipeline ─────────────────────────────────────────────────────

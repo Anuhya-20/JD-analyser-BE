@@ -18,6 +18,16 @@ class ResumeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Candidate profile fields (populated after pipeline runs)
+    candidate_profile_id: Optional[uuid.UUID] = None
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    candidate_status: Optional[str] = None
+
+    # Match result fields
+    overall_score: Optional[float] = None
+    rank: Optional[int] = None
+
     model_config = {"from_attributes": True}
 
 
