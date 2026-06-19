@@ -68,10 +68,9 @@ Strengths: {strengths} | Weaknesses: {weaknesses}""",
 
 
 def _level(score: float) -> str:
-    if score >= 80: return "strongly_recommended"
-    if score >= 65: return "recommended"
-    if score >= 45: return "maybe"
-    return "not_recommended"
+    if score >= 70: return "strongly_recommended"
+    if score >= 50: return "recommended"
+    return "maybe"
 
 
 def _fresher_stages() -> List[str]:
@@ -174,9 +173,14 @@ def _full_rec(score: MatchScore, profile_lookup: dict, jd: dict) -> CandidateRec
             "weaknesses":        trim_list(score.get("weaknesses", []), 4, " | "),
         })
 
+        # Apply minimum floor: LLM can upgrade but never go below score-based level
+        floor = _level(score["overall_score"])
+        _rank = {"not_recommended": 0, "maybe": 1, "recommended": 2, "strongly_recommended": 3}
+        final_level = result.recommendation_level if _rank.get(result.recommendation_level, 0) >= _rank.get(floor, 0) else floor
+
         return CandidateRecommendation(
             resume_id=score["resume_id"],
-            recommendation_level=result.recommendation_level,
+            recommendation_level=final_level,
             recruiter_notes=result.recruiter_notes,
             interview_questions=[],
             suggested_interview_stages=result.suggested_interview_stages,
