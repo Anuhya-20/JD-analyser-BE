@@ -49,7 +49,106 @@ class CandidateStatusListResponse(BaseModel):
     pages: int
 
 
+class AcceptedCandidateItem(BaseModel):
+    candidate_profile_id: uuid.UUID
+    resume_id: uuid.UUID
+    full_name: Optional[str]
+    email: Optional[str]
+    location: Optional[str]
+    total_years_experience: Optional[float]
+    overall_score: Optional[float]
+    rank: Optional[int]
+    jd_id: uuid.UUID
+    job_title: Optional[str]
+    company_name: Optional[str]
+    status: str = "accepted"
+
+    model_config = {"from_attributes": True}
+
+
+class AcceptedCandidateListResponse(BaseModel):
+    items: List[AcceptedCandidateItem]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.get("/accepted", response_model=AcceptedCandidateListResponse)
+async def list_accepted_candidates(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by candidate name or email"),
+    db: AsyncSession = Depends(get_db),
+    current_user: HRUser = Depends(get_current_hr_user),
+):
+    """Return all accepted candidates across all job descriptions with JD info and match scores."""
+    base_q = select(CandidateProfile).where(CandidateProfile.status == CandidateStatus.ACCEPTED)
+
+    if search:
+        term = f"%{search.strip()}%"
+        base_q = base_q.where(
+            (CandidateProfile.full_name.ilike(term)) | (CandidateProfile.email.ilike(term))
+        )
+
+    total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
+
+    profiles = (await db.execute(
+        base_q.order_by(CandidateProfile.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )).scalars().all()
+
+    if not profiles:
+        return AcceptedCandidateListResponse(items=[], total=0, page=page, page_size=page_size, pages=1)
+
+    profile_ids = [p.id for p in profiles]
+    jd_ids = list({p.job_description_id for p in profiles})
+
+    # Bulk load match results
+    mr_rows = (await db.execute(
+        select(MatchResult).where(
+            MatchResult.candidate_profile_id.in_(profile_ids),
+            MatchResult.status == MatchStatus.COMPLETED,
+        )
+    )).scalars().all()
+    mrs = {str(mr.candidate_profile_id): mr for mr in mr_rows}
+
+    # Bulk load job descriptions
+    jd_rows = (await db.execute(
+        select(JobDescription).where(JobDescription.id.in_(jd_ids))
+    )).scalars().all()
+    jds = {str(jd.id): jd for jd in jd_rows}
+
+    items = []
+    for p in profiles:
+        mr = mrs.get(str(p.id))
+        jd = jds.get(str(p.job_description_id))
+        items.append(AcceptedCandidateItem(
+            candidate_profile_id=p.id,
+            resume_id=p.resume_id,
+            full_name=p.full_name,
+            email=p.email,
+            location=p.location,
+            total_years_experience=p.total_years_experience,
+            overall_score=mr.overall_score if mr else None,
+            rank=mr.rank if mr else None,
+            jd_id=p.job_description_id,
+            job_title=jd.title if jd else None,
+            company_name=jd.company_name if jd else None,
+            status="accepted",
+        ))
+
+    return AcceptedCandidateListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=math.ceil(total / page_size) if total > 0 else 1,
+    )
+
 
 @router.get("/{jd_id}", response_model=CandidateStatusListResponse)
 async def list_candidates_with_status(
