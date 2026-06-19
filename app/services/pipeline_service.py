@@ -241,7 +241,7 @@ async def execute_pipeline(
             logger.info(f"[Pipeline] Completed successfully for JD={jd_id_str}")
 
         except Exception as e:
-            logger.error(f"[Pipeline] Failed for JD={jd_id_str}: {e}", exc_info=True)
+            logger.opt(exception=True).error("[Pipeline] Failed for JD={}: {}", jd_id_str, str(e))
             await db.rollback()
             await db.execute(
                 update(JobDescription)

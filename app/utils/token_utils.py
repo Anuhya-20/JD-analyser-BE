@@ -66,8 +66,13 @@ def coerce_llm_output(model_cls, data: dict) -> dict:
         origin = get_origin(ann)
         args = get_args(ann)
         if origin is list:
-            # List[X] — null → []
-            result[k] = v if isinstance(v, list) else []
+            # List[X] — null → []; bare string → wrap in list
+            if isinstance(v, list):
+                result[k] = v
+            elif isinstance(v, str) and v:
+                result[k] = [v]
+            else:
+                result[k] = []
         elif origin is Union and type(None) in args:
             non_none = [a for a in args if a is not type(None)]
             inner_origin = get_origin(non_none[0]) if non_none else None
