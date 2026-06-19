@@ -5,7 +5,7 @@ Optimisation: JD text capped at 2500 chars; system prompt compressed; max_tokens
 """
 from __future__ import annotations
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 
@@ -41,6 +41,15 @@ class JDStructuredOutput(BaseModel):
     is_entry_level: bool = False
     accepts_freshers: bool = False
     is_internship: bool = False
+
+    @field_validator(
+        "required_skills", "preferred_skills", "education_requirements",
+        "responsibilities", "key_technologies",
+        mode="before",
+    )
+    @classmethod
+    def null_to_empty_list(cls, v):
+        return v if v is not None else []
 
 
 JD_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([

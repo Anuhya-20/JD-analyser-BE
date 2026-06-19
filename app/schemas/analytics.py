@@ -65,6 +65,7 @@ class CandidateRatingDetail(BaseModel):
     weaknesses: Optional[List[str]]
     analysis_summary: Optional[str]
     recommendation_level: Optional[str]
+    status: Optional[str] = "pending"
     recruiter_notes: Optional[str]
     interview_questions: Optional[List[str]]
     suggested_interview_stages: Optional[List[str]]
