@@ -17,6 +17,8 @@ from app.config import settings
 from app.database import get_db
 from app.models.job_description import JobDescription, JDStatus
 from app.models.resume import Resume, ResumeStatus
+from app.models.candidate_profile import CandidateProfile
+from app.models.match_result import MatchResult
 from app.models.hr_user import HRUser
 from app.core.deps import get_current_hr_user
 from app.schemas.resume import ResumeResponse, ResumeListResponse, BulkUploadResponse
@@ -254,27 +256,64 @@ async def list_resumes(
     db: AsyncSession = Depends(get_db),
     current_user: HRUser = Depends(get_current_hr_user),
 ):
-    """List all resumes uploaded for a job description."""
+    """List all resumes uploaded for a job description, enriched with candidate and match data."""
     result = await db.execute(select(JobDescription).where(JobDescription.id == jd_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Job description not found")
 
-    query = select(Resume).where(Resume.job_description_id == jd_id)
+    base_query = select(Resume).where(Resume.job_description_id == jd_id)
     if status:
         try:
-            query = query.where(Resume.status == ResumeStatus(status))
+            base_query = base_query.where(Resume.status == ResumeStatus(status))
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
-    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total = count_result.scalar_one()
 
-    query = query.order_by(Resume.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    resumes = result.scalars().all()
+    # Single query: resumes + candidate profile + match result (LEFT JOINs)
+    enriched_query = (
+        select(
+            Resume,
+            CandidateProfile.id.label("cp_id"),
+            CandidateProfile.full_name,
+            CandidateProfile.email,
+            CandidateProfile.status.label("cp_status"),
+            MatchResult.overall_score,
+            MatchResult.rank,
+        )
+        .where(Resume.job_description_id == jd_id)
+        .outerjoin(CandidateProfile, CandidateProfile.resume_id == Resume.id)
+        .outerjoin(MatchResult, MatchResult.candidate_profile_id == CandidateProfile.id)
+        .order_by(
+            MatchResult.rank.asc().nulls_last(),
+            Resume.created_at.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    if status:
+        try:
+            enriched_query = enriched_query.where(Resume.status == ResumeStatus(status))
+        except ValueError:
+            pass
+
+    rows = (await db.execute(enriched_query)).all()
+
+    items = []
+    for row in rows:
+        resume = row[0]
+        data = ResumeResponse.model_validate(resume)
+        data.candidate_profile_id = row[1]
+        data.candidate_name = row[2]
+        data.candidate_email = row[3]
+        data.candidate_status = row[4].value if row[4] else None
+        data.overall_score = row[5]
+        data.rank = row[6]
+        items.append(data)
 
     return ResumeListResponse(
-        items=[ResumeResponse.model_validate(r) for r in resumes],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
