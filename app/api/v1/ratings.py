@@ -199,6 +199,7 @@ async def get_candidate_rating(
         weaknesses=mr.weaknesses,
         analysis_summary=mr.analysis_summary,
         recommendation_level=rec.level.value if rec else None,
+        status=cp.status.value if cp else "pending",
         recruiter_notes=rec.recruiter_notes if rec else None,
         interview_questions=rec.interview_questions if rec else None,
         suggested_interview_stages=rec.suggested_interview_stages if rec else None,
